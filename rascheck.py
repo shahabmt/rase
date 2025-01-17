@@ -288,8 +288,37 @@ async def ask_fee_rate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(summary, parse_mode=ParseMode.MARKDOWN)
     return CONFIRM
 
+import json
+
+# تابع کمکی جهت به‌روزرسانی فایل usage.json برای ثبت تعداد استفاده‌های هر کاربر
+def update_usage_count(user_id: int) -> int:
+    usage_file = "usage.json"
+    # ابتدا تلاش می‌کنیم فایل را بخوانیم؛ اگر وجود نداشته باشد، یک دیکشنری خالی در نظر می‌گیریم
+    try:
+        with open(usage_file, "r", encoding="utf-8") as f:
+            usage_data = json.load(f)
+    except Exception:
+        usage_data = {}
+
+    # مقدار استفاده برای کاربر
+    user_key = str(user_id)
+    if user_key in usage_data:
+        usage_data[user_key] += 1
+    else:
+        usage_data[user_key] = 1
+
+    # ذخیره‌سازی استفاده‌ها در فایل
+    try:
+        with open(usage_file, "w", encoding="utf-8") as f:
+            json.dump(usage_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Error writing usage file:", e)
+
+    return usage_data[user_key]
+
+
 async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Entered confirm_data")
+    print("Entered confirm_data")
     text = update.message.text.strip().lower()
     if text not in ["بلی", "yes", "ok"]:
         await update.message.reply_text("عملیات لغو شد. برای شروع دوباره، دستور /start را ارسال کنید.")
@@ -326,17 +355,34 @@ async def confirm_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(result_msg, parse_mode=ParseMode.MARKDOWN)
     
-    # ارسال گزارش به مدیر (ADMIN_CHAT_ID)
+    # به‌روزرسانی تعداد استفاده‌های کاربر در فایل usage.json
+    user = update.effective_user
+    usage_count = update_usage_count(user.id)
+    
+    # دریافت اطلاعات کاربر جهت گزارش به مدیر
+    user_info = (
+        f"شناسه کاربر: {user.id}\n"
+        f"نام کاربری: @{user.username if user.username else '---'}\n"
+        f"نام کامل: {user.first_name} {user.last_name if user.last_name else ''}\n"
+    )
+    
+    # ساخت گزارش نهایی جهت ارسال به مدیر
+    report_text = (
+        "گزارش استفاده از MyRasChekBot:\n\n"
+        f"{user_info}\n"
+        f"تعداد دفعات استفاده (برای این کاربر): {usage_count}\n\n"
+        "خلاصه اطلاعات:\n"
+        f"- تعداد چک‌ها: {context.user_data['count']}\n"
+        f"- مجموع مبالغ: {sum_ai:,.0f} ریال\n\n"
+        "نتیجه محاسبات:\n"
+        f"{result_msg}"
+    )
     try:
-        report_text = (
-            "گزارش استفاده از MyRasChekBot:\n"
-            f"تعداد دفعات استفاده: ۱ (برای این تراکنش)\n"
-            f"خلاصه اطلاعات:\n{result_msg}"
-        )
         await update.effective_bot.send_message(chat_id=ADMIN_CHAT_ID, text=report_text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
-        logger.error("Error sending report to admin: %s", e)
+        print("Error sending report to admin:", e)
     
+    await update.message.reply_text("برای استفاده مجدد /start را ارسال کنید.")
     context.user_data.clear()
     return ConversationHandler.END
 
